@@ -4,7 +4,6 @@ from selenium.webdriver.chrome.options import Options
 from datetime import datetime
 from random import randint
 import time, os
-import dates as d
  
 
 USER = os.environ.get("intemo_user")
@@ -12,17 +11,6 @@ PASS = os.environ.get("intemo_pass")
 ACTION = os.environ.get('INTEMO_ACTION')
 INTEMO_HOST = os.environ.get('INTEMO_HOST')
 driver = None
- 
-def parse_dates():
-    date_format = "%Y%m%d"
-    today = datetime.strftime(datetime.today(), date_format)
-    is_workday = d.dates[today]
- 
-    if is_workday == "#CCCCCC":
-        print(f'Date: {today} is {is_workday}. TODAY IS WORKDAY. Proceed.')
-    else:
-        print(f'Date: {today} is {is_workday}. Today IS NOT workday. Nothing to do.')
-        exit(0)
  
 def wait_for_execution(wait_for):
     """
@@ -45,6 +33,7 @@ def init_selenium():
     chrome_options = Options()
     chrome_options.add_argument("--headless") # for Chrome >= 109
     chrome_options.add_argument("--no-sandbox") # ensure compatibility with docker
+    chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.3")
     driver = webdriver.Chrome(options=chrome_options)
     print(f'Opening start url {start_url}...')
     driver.get(start_url)
@@ -116,6 +105,44 @@ def validate(entry_type):
  
     driver.switch_to.parent_frame()
  
+def check_calendar():
+    calendar_url = f'{INTEMO_HOST}/TimeAndAttendance/MyCalendar'
+    print('\nCheck calendar: ' + calendar_url)
+    print(f'Opening calendar url {calendar_url}...')
+
+    driver.get(calendar_url)
+    lines = driver.page_source.splitlines()
+
+    work_time_table = []
+    # Now you can process each line
+
+    for line in lines:
+        # Your logic here (e.g., print the line)
+        if "workTimetableColors" in line and not "dateIndex" in line:
+            work_time_table.append(line.replace(" ", "").replace(";", ""))
+
+    dates_object = {}
+    for item in work_time_table:
+        if not "varworkTimetableColors" in item:
+            str_split = item.split('"')
+            dates_object[str_split[1]] = str_split[3]
+
+    # Switch back to previous page
+    driver.get(f'{INTEMO_HOST}/TimeAndAttendance/EmployeeDashboard')
+    return dates_object
+
+def parse_working_days(working_days):
+    date_format = "%Y%m%d"
+    today = datetime.strftime(datetime.today(), date_format)
+    print(f'Check if today is a workday ({today})')
+    is_workday = working_days[today]
+
+    if is_workday == "#CCCCCC":
+        print(f'Date: {today} is {is_workday}. TODAY IS WORKDAY. Proceed.')
+    else:
+        print(f'Date: {today} is {is_workday}. Today IS NOT workday. Nothing to do.')
+        exit(0)
+
 # START MAIN FUNCTION
 if __name__ == "__main__":
     print(ACTION)
@@ -123,9 +150,6 @@ if __name__ == "__main__":
         print('You must provide an action: start / exit')
         exit(1)
     
-    # Check if it is a working day (not holidays, not weekend)
-    parse_dates()
- 
     # Init driver
     init_selenium()
  
@@ -133,37 +157,46 @@ if __name__ == "__main__":
     # wait_for_execution(300)
  
     # Search for form user/pass input boxes
+    print("\nLet's log the user in...")
     username = find_element('ID', ["Username"])
     password = find_element('ID', ["Password"])
  
     username.send_keys(USER)
     password.send_keys(PASS)
  
-    # # LOGIN BUTTON
-    # # In headless mode the language might change so we need to test both
-    # login_queries = ["//button[text()='Iniciar sesión']", "//button[text()='Log in']"]
-    # login_btn = find_element('XPATH', login_queries)
-    # login_btn.click()
+    # LOGIN BUTTON
+    # In headless mode the language might change so we need to test both
+    login_queries = ["//button[text()='Iniciar sesión']", "//button[text()='Log in']"]
+    login_btn = find_element('XPATH', login_queries)
+    login_btn.click()
  
-    # # Give it time for rendering the window
-    # # (should use the webdriverwait but... this is easier)
-    # time.sleep(1)
+    # Give it time for rendering the window
+    # (should use the webdriverwait but... this is easier)
+    time.sleep(1)
+    print('Done')
+
+    # Dynamically hceck calendar for workdays / holidays
+    working_days = check_calendar()
+
+    # Check if it's a working day (not holidays, not weekend)
+    # If it's not a owrking day, the script will exit
+    parse_working_days(working_days)
  
-    # if ACTION == "start":
-    #     # CHECK IF START EXISTS
-    #     print('\nSearch for Start/Inicio')
-    #     entry_start_queries = ["//*[contains(@title, 'Inicio')]//ancestor::div[contains(@class, 'real-record')]", "//*[contains(@title, 'Start')]//ancestor::div[contains(@class, 'real-record')]"]
-    #     entry_start = find_element('XPATH', entry_start_queries)
-    #     if record_do_not_exist('start', entry_start):
-    #         validate('start')
+    if ACTION == "start":
+        # CHECK IF START EXISTS
+        print('\nSearch for Start/Inicio')
+        entry_start_queries = ["//*[contains(@title, 'Inicio')]//ancestor::div[contains(@class, 'real-record')]", "//*[contains(@title, 'Start')]//ancestor::div[contains(@class, 'real-record')]"]
+        entry_start = find_element('XPATH', entry_start_queries)
+        if record_do_not_exist('start', entry_start):
+            validate('start')
  
-    # elif ACTION == "exit":
-    #     # CHECK IF EXIT EXISTS
-    #     print('\nSearch for End/Fin')
-    #     entry_exit_queries = ["//*[contains(@title, 'Fin')]//ancestor::div[contains(@class, 'real-record')]", "//*[contains(@title, 'End')]//ancestor::div[contains(@class, 'real-record')]"]
-    #     entry_exit = find_element('XPATH', entry_exit_queries)
-    #     if record_do_not_exist('exit', entry_exit):
-    #         validate('exit')
+    elif ACTION == "exit":
+        # CHECK IF EXIT EXISTS
+        print('\nSearch for End/Fin')
+        entry_exit_queries = ["//*[contains(@title, 'Fin')]//ancestor::div[contains(@class, 'real-record')]", "//*[contains(@title, 'End')]//ancestor::div[contains(@class, 'real-record')]"]
+        entry_exit = find_element('XPATH', entry_exit_queries)
+        if record_do_not_exist('exit', entry_exit):
+            validate('exit')
  
     driver.quit()
     

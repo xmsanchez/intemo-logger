@@ -10,9 +10,7 @@ This project allows you to automate logging in intemo hour control system.
 
 The deployment is done in **Google Cloud** and the execution leverages the **Google Cloud Run** service, which has a few triggers at the time where you need to run the script (morning and afternoon).
 
-It will make sure if it is a **working day**, a **holiday** or **vacation** (but see below warning)
-
-> **WARNING**: This feature **is not** dynamic for now. I need to work on extracting it automatically. For now, you need to manually extract the json file with the CSS used in the calendar and place it in [dates.py](dates.py).
+It will make sure if it is a **working day**, a **holiday** or **vacation** by fetching the calendar. It is based on CSS colors.
 
 ## How it works
 

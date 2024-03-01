@@ -9,7 +9,6 @@ RUN dpkg -i google-chrome-stable_current_amd64.deb; apt-get -fy install
 RUN mkdir /app
  
 COPY main.py /app
-COPY dates.py /app
 COPY requirements.txt /app
  
 WORKDIR /app
