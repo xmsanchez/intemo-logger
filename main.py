@@ -4,14 +4,14 @@ from selenium.webdriver.chrome.options import Options
 from datetime import datetime
 from random import randint
 import time, os
- 
+
 
 USER = os.environ.get("intemo_user")
 PASS = os.environ.get("intemo_pass")
 ACTION = os.environ.get('INTEMO_ACTION')
 INTEMO_HOST = os.environ.get('INTEMO_HOST')
 driver = None
- 
+
 def wait_for_execution(wait_for):
     """
     Wait for the script execution
@@ -20,7 +20,7 @@ def wait_for_execution(wait_for):
     rand = randint(0, wait_for)
     print(f'\nWait for {rand} seconds before executing the operation so this looks more like human interaction :-) ...')
     time.sleep(rand)
- 
+
 def init_selenium():
     """
     Initialize driver
@@ -38,11 +38,11 @@ def init_selenium():
     print(f'Opening start url {start_url}...')
     driver.get(start_url)
     print('Done')
- 
+
 def find_element(query_type, queries):
     """
     Find an element based on query type and query value
- 
+
     Args:
         query_type(str): Can be ID, CLASS_NAME, XPATH
         queries(list): Array of queries to send to selenium
@@ -63,7 +63,7 @@ def find_element(query_type, queries):
             pass
     #print(f'Response: {response}')
     return response
- 
+
 def record_do_not_exist(entry_type, entry):
     """
     Check if a record exists
@@ -74,7 +74,7 @@ def record_do_not_exist(entry_type, entry):
     else:
         print(f'{entry_type} not found!')
         return True
- 
+
 def validate(entry_type):
     """
     Validates entry/exit
@@ -90,21 +90,21 @@ def validate(entry_type):
         btn.click()
     else:
         raise('Found an error. btn is none')
- 
+
     print(f'\nSwitching to iframe to add an "{entry_type}" record...')
     time.sleep(2)
     iframe = find_element('XPATH', ["//iframe"])
     driver.switch_to.frame(iframe)
- 
+
     btn_validate = find_element('XPATH', ["//button[text()='Validate']", "//button[text()='Validar']"])
- 
+
     try:
         btn_validate.click()
     except Exception as ex:
         print(f'Got an error!: {ex}')
- 
+
     driver.switch_to.parent_frame()
- 
+
 def check_calendar():
     calendar_url = f'{INTEMO_HOST}/TimeAndAttendance/MyCalendar'
     print('\nCheck calendar: ' + calendar_url)
@@ -114,6 +114,7 @@ def check_calendar():
     lines = driver.page_source.splitlines()
 
     work_time_table = []
+    incidences = []
     # Now you can process each line
 
     for line in lines:
@@ -121,9 +122,25 @@ def check_calendar():
         if "workTimetableColors" in line and not "dateIndex" in line:
             work_time_table.append(line.replace(" ", "").replace(";", ""))
 
+    for line in lines:
+        # Your logic here (e.g., print the line)
+        if "    incidences" in line and not "dateIndex" in line:
+            incidences.append(line.replace(" ", "").replace(";", ""))
+
     dates_object = {}
+
+    # Check all items in workTimeTable (should have the whole calendar)
     for item in work_time_table:
         if not "varworkTimetableColors" in item:
+            str_split = item.split('"')
+            dates_object[str_split[1]] = str_split[3]
+
+    # IF there are incidences defined we'll use them to
+    # override items in the previous fetch calendar
+    # This is useful when we don't have holidays approved yet (might happen)
+    # so we'll create an incidence with any topic to just have them "marked"
+    for item in incidences:
+        if not "incidences = " in item:
             str_split = item.split('"')
             dates_object[str_split[1]] = str_split[3]
 
@@ -149,27 +166,29 @@ if __name__ == "__main__":
     if ACTION is None or ACTION == "":
         print('You must provide an action: start / exit')
         exit(1)
-    
+
     # Init driver
     init_selenium()
- 
+
     # # Wait for some seconds before starting (give it a random entry/exit time)
     # wait_for_execution(300)
- 
+
     # Search for form user/pass input boxes
     print("\nLet's log the user in...")
     username = find_element('ID', ["Username"])
     password = find_element('ID', ["Password"])
- 
+
     username.send_keys(USER)
     password.send_keys(PASS)
- 
+
     # LOGIN BUTTON
     # In headless mode the language might change so we need to test both
-    login_queries = ["//button[text()='Iniciar sesión']", "//button[text()='Log in']"]
+    login_queries = ["//button[text()='Log in']"]
     login_btn = find_element('XPATH', login_queries)
+    # This might be needed in some cases to ensure the button is clickable
+    driver.execute_script("arguments[0].scrollIntoView();", login_btn)
     login_btn.click()
- 
+
     # Give it time for rendering the window
     # (should use the webdriverwait but... this is easier)
     time.sleep(1)
@@ -181,7 +200,7 @@ if __name__ == "__main__":
     # Check if it's a working day (not holidays, not weekend)
     # If it's not a owrking day, the script will exit
     parse_working_days(working_days)
- 
+
     if ACTION == "start":
         # CHECK IF START EXISTS
         print('\nSearch for Start/Inicio')
@@ -189,7 +208,7 @@ if __name__ == "__main__":
         entry_start = find_element('XPATH', entry_start_queries)
         if record_do_not_exist('start', entry_start):
             validate('start')
- 
+
     elif ACTION == "exit":
         # CHECK IF EXIT EXISTS
         print('\nSearch for End/Fin')
@@ -197,6 +216,5 @@ if __name__ == "__main__":
         entry_exit = find_element('XPATH', entry_exit_queries)
         if record_do_not_exist('exit', entry_exit):
             validate('exit')
- 
+
     driver.quit()
-    
