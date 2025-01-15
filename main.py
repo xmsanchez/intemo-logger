@@ -1,220 +1,224 @@
+import requests
+import os
+import re
+from datetime import datetime
+from lxml import html
+
+# Selenium will be used only in the final step to validate entries
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
-from datetime import datetime
-from random import randint
-import time, os
-
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 USER = os.environ.get("intemo_user")
 PASS = os.environ.get("intemo_pass")
 ACTION = os.environ.get('INTEMO_ACTION')
 INTEMO_HOST = os.environ.get('INTEMO_HOST')
-driver = None
 
-def wait_for_execution(wait_for):
-    """
-    Wait for the script execution
-    This should provide a more human-like entry/exit register
-    """
-    rand = randint(0, wait_for)
-    print(f'\nWait for {rand} seconds before executing the operation so this looks more like human interaction :-) ...')
-    time.sleep(rand)
+headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",
+    'content-type': 'application/x-www-form-urlencoded',
+    'referer': f'{INTEMO_HOST}'
+}
 
-def init_selenium():
-    """
-    Initialize driver
-    """
-    global driver
-    # Start URL is the host + login path
-    start_url = f'{INTEMO_HOST}/Security/LogIn/LogIn'
-    print('Start with url: ' + start_url)
-    print(f'\nInitializing selenium chrome driver...')
-    chrome_options = Options()
-    chrome_options.add_argument("--headless") # for Chrome >= 109
-    chrome_options.add_argument("--no-sandbox") # ensure compatibility with docker
-    chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.3")
-    driver = webdriver.Chrome(options=chrome_options)
-    print(f'Opening start url {start_url}...')
-    driver.get(start_url)
-    print('Done')
+start_url = f'{INTEMO_HOST}/Security/LogIn/LogIn'
 
-def find_element(query_type, queries):
-    """
-    Find an element based on query type and query value
+def check_response(response):
+    response_code = response.status_code
+    response_message = response.content
 
-    Args:
-        query_type(str): Can be ID, CLASS_NAME, XPATH
-        queries(list): Array of queries to send to selenium
-    """
-    global driver
-    response = None
-    for query in queries:
-        try:
-            if query_type == 'ID':
-                response = driver.find_element(By.ID, query)
-            elif query_type == 'CLASS_NAME':
-                response = driver.find_element(By.CLASS_NAME, query)
-            elif query_type == 'LINK_TEXT':
-                response = driver.find_element(By.LINK_TEXT, query)
-            if query_type == 'XPATH':
-                response = driver.find_element(By.XPATH, value=query)
-        except Exception:
-            pass
-    #print(f'Response: {response}')
-    return response
+    if response_code == 200:
+        print('OK')
+    else:
+        print('Response code: ' + str(response_code))
+        raise Exception(f'Message: {response_message}')
 
-def record_do_not_exist(entry_type, entry):
-    """
-    Check if a record exists
-    """
-    if entry is not None:
-        print(f'{entry_type} time: {entry.text}')
+def login_user(session, cookies):
+    # Generate the payload for the login
+    payload = { "__RequestVerificationToken": cookies['__RequestVerificationToken'],
+                "Username": USER,
+                "Password": PASS,
+                "RememberMe": False}
+
+    print('\nInitiate login')
+    response = session.post(f'{INTEMO_HOST}/Security/LogIn/LogIn',
+                            data=payload,
+                            headers=headers,
+                            cookies=cookies)
+
+    check_response(response)
+    return response.request._cookies.get_dict()
+
+def is_working_day(tree):
+    print('\nCheck if today is a working day')
+    # Extract all <script> tags' content
+    script_contents = tree.xpath("//script/text()")
+
+    # Find the specific script containing the target keywords
+    target_script = next(
+        (script for script in script_contents if "workTimetableColors" in script and "workTimetableDescriptions" in script),
+        None
+    )
+
+    work_timetable_working_days = []
+    work_timetable_not_working_days = []
+
+    if target_script:
+        # Use regex to extract the keys and values for workTimetableColors and workTimetableDescriptions
+        # Thanks for this, GPT ;-D
+        colors_pattern = re.compile(r'workTimetableColors\["(\d+)"\]\s*=\s*"([^"]+)"')
+        descriptions_pattern = re.compile(r'workTimetableDescriptions\["(\d+)"\]\s*=\s*"([^"]+)"')
+
+        # work_timetable_colors is not really used but I'll leave it to switch to it just in
+        # case intemo makes some changes to the descriptions that might affect this script
+        work_timetable_colors = {match[0]: match[1] for match in colors_pattern.findall(target_script)}
+        work_timetable_descriptions = {match[0]: match[1] for match in descriptions_pattern.findall(target_script)}
+
+        for item in work_timetable_descriptions:
+            if "Horario SaaS" in work_timetable_descriptions[item] or 'Horario   viernes' in work_timetable_descriptions[item]:
+                work_timetable_working_days.append(item)
+            else:
+                work_timetable_not_working_days.append(item)
+
+    # Get today's date formatted as YYYYMMDD
+    today = datetime.today()
+    today_date = today.strftime("%Y%m%d")
+    today_date_formatted = today.strftime("%A, %dth of %B %Y")
+
+    print("Today's date: " + today_date_formatted)
+    if today_date in work_timetable_working_days:
+        print('This IS a working day')
+        return True
+    elif today_date in work_timetable_not_working_days:
+        print('This is NOT a working day')
         return False
     else:
-        print(f'{entry_type} not found!')
-        return True
+        raise Exception('Today date not found in calendar')
 
-def validate(entry_type):
-    """
-    Validates entry/exit
-    """
-    print(f'Entry type is: {entry_type}')
-    entry_type_text = {
-        'start': ['Entrada trabajo'],
-        'exit': ['Fin trabajo']
-    }
-    print(f'\nNeed to register: "{entry_type_text[entry_type][0]}"')
-    btn = find_element('XPATH', [f"//*[contains(@title, '{entry_type_text[entry_type][0]}')]"])
-    if btn is not None:
-        btn.click()
-    else:
-        raise('Found an error. btn is none')
+def get_employee_calendar(session, cookies):
+    # Fetch the calendar to ensure today is a workday and not weekend or holiday
+    print('\nGet calendar')
+    response = session.get(f'{INTEMO_HOST}/TimeAndAttendance/MyCalendar',
+                            allow_redirects=False,
+                            headers=headers,
+                            cookies=cookies)
 
-    print(f'\nSwitching to iframe to add an "{entry_type}" record...')
-    time.sleep(2)
-    iframe = find_element('XPATH', ["//iframe"])
-    driver.switch_to.frame(iframe)
+    check_response(response)
+    return response
 
-    btn_validate = find_element('XPATH', ["//button[text()='Validate']", "//button[text()='Validar']"])
+def get_entries(session, cookies):
+    print('\nGet entries for today')
+    response = session.get(f'{INTEMO_HOST}/TimeAndAttendance/EmployeeDashboard',
+                            allow_redirects=False,
+                            headers=headers,
+                            cookies=cookies)
 
-    try:
+    check_response(response)
+
+    # Parse the HTML
+    tree = html.fromstring(response.content)
+
+    # Extract entries and exits for today
+    # Note that strip() gets rid of \r\n at the end of each time string
+    entries = tree.xpath('//div[@class="real-record"]/div/img[contains(@src, "entry.png")]/following-sibling::text()')
+    entries = [entry.strip() for entry in entries]
+
+    exits = tree.xpath('//div[@class="real-record"]/div/img[contains(@src, "exit.png")]/following-sibling::text()')
+    exits = [exit.strip() for exit in exits]
+
+    return entries, exits
+
+def selenium_init(cookies):
+    print('Opening browser with selenium...')
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--no-sandbox") # Required to run in docker
+    chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.3")
+    driver = webdriver.Chrome(options=chrome_options)
+
+    # Apparently it won't work without this first connection
+    driver.get(f"{INTEMO_HOST}/")
+
+    # Transfer cookies from requests to selenium
+    for name, value in cookies.items():
+        driver.add_cookie({'name': name, 'value': value})
+
+    # Refresh the page to load the cookies
+    driver.refresh()
+
+    return driver
+
+def new_record(cookies, entry_type):
+    # For some reason direct api calls are not working properly for this step
+    # Therefore we will use Selenium to validate start/end work
+
+    # Initiate selenium and transfer cookies from requests to browser
+    driver = selenium_init(cookies)
+
+    # Request the iframe from where the start/end records are created
+    driver.get(f'{INTEMO_HOST}/TimeAndAttendance/MyAccessRecords/CreateWork{entry_type}')
+
+    # Wait until the button is found
+    wait = WebDriverWait(driver, 10)
+    btn_validate = wait.until(
+        EC.presence_of_element_located(
+            (By.CSS_SELECTOR, "button.btn.btn-primary")
+        )
+    )
+
+    # Finally create the new record
+    if btn_validate is not None:
         btn_validate.click()
-    except Exception as ex:
-        print(f'Got an error!: {ex}')
-
-    driver.switch_to.parent_frame()
-
-def check_calendar():
-    calendar_url = f'{INTEMO_HOST}/TimeAndAttendance/MyCalendar'
-    print('\nCheck calendar: ' + calendar_url)
-    print(f'Opening calendar url {calendar_url}...')
-
-    driver.get(calendar_url)
-    lines = driver.page_source.splitlines()
-
-    work_time_table = []
-    incidences = []
-    # Now you can process each line
-
-    for line in lines:
-        # Your logic here (e.g., print the line)
-        if "workTimetableColors" in line and not "dateIndex" in line:
-            work_time_table.append(line.replace(" ", "").replace(";", ""))
-
-    for line in lines:
-        # Your logic here (e.g., print the line)
-        if "    incidences" in line and not "dateIndex" in line:
-            incidences.append(line.replace(" ", "").replace(";", ""))
-
-    dates_object = {}
-
-    # Check all items in workTimeTable (should have the whole calendar)
-    for item in work_time_table:
-        if not "varworkTimetableColors" in item:
-            str_split = item.split('"')
-            dates_object[str_split[1]] = str_split[3]
-
-    # IF there are incidences defined we'll use them to
-    # override items in the previous fetch calendar
-    # This is useful when we don't have holidays approved yet (might happen)
-    # so we'll create an incidence with any topic to just have them "marked"
-    for item in incidences:
-        if not "incidences = " in item:
-            str_split = item.split('"')
-            dates_object[str_split[1]] = str_split[3]
-
-    # Switch back to previous page
-    driver.get(f'{INTEMO_HOST}/TimeAndAttendance/EmployeeDashboard')
-    return dates_object
-
-def parse_working_days(working_days):
-    date_format = "%Y%m%d"
-    today = datetime.strftime(datetime.today(), date_format)
-    print(f'Check if today is a workday ({today})')
-    is_workday = working_days[today]
-
-    if is_workday == "#CCCCCC":
-        print(f'Date: {today} is {is_workday}. TODAY IS WORKDAY. Proceed.')
     else:
-        print(f'Date: {today} is {is_workday}. Today IS NOT workday. Nothing to do.')
-        exit(0)
+        raise('Found an error.')
 
-# START MAIN FUNCTION
+    print('OK')
+
+# Start the main program
 if __name__ == "__main__":
-    print(ACTION)
     if ACTION is None or ACTION == "":
         print('You must provide an action: start / exit')
         exit(1)
 
-    # Init driver
-    init_selenium()
+    print('\nInitiate requests session')
+    session = requests.Session()
+    session.get(f'{INTEMO_HOST}/Security/LogIn/LogIn', headers=headers)
 
-    # # Wait for some seconds before starting (give it a random entry/exit time)
-    # wait_for_execution(300)
+    # Get the received cookies and log in the user
+    cookies = session.cookies.get_dict()
 
-    # Search for form user/pass input boxes
-    print("\nLet's log the user in...")
-    username = find_element('ID', ["Username"])
-    password = find_element('ID', ["Password"])
+    # Log in user and retrieve additional cookies required for further requests
+    request_cookies = login_user(session, cookies)
 
-    username.send_keys(USER)
-    password.send_keys(PASS)
+    # We need to add an additional cookie required for certain requests
+    # like checking the calendar or validating the start/end work
+    try:
+        cookies['.AspNet.Cookies'] = request_cookies['.AspNet.Cookies']
+    except Exception as ex:
+        raise Exception('Required ".AspNet.Cookies" cookie was not found in the login response.')
 
-    # LOGIN BUTTON
-    # In headless mode the language might change so we need to test both
-    login_queries = ["//button[text()='Log in']"]
-    login_btn = find_element('XPATH', login_queries)
-    # This might be needed in some cases to ensure the button is clickable
-    driver.execute_script("arguments[0].scrollIntoView();", login_btn)
-    login_btn.click()
+    # Retrieve calendar
+    calendar = get_employee_calendar(session, cookies)
 
-    # Give it time for rendering the window
-    # (should use the webdriverwait but... this is easier)
-    time.sleep(1)
-    print('Done')
+    # Check if today is weekday or weekend/holiday
+    if is_working_day(html.fromstring(calendar.content)):
 
-    # Dynamically hceck calendar for workdays / holidays
-    working_days = check_calendar()
+        # Get entries and exits
+        entries, exits = get_entries(session, cookies)
 
-    # Check if it's a working day (not holidays, not weekend)
-    # If it's not a owrking day, the script will exit
-    parse_working_days(working_days)
+        print(f'Action to perform: {ACTION}')
+        if ACTION == "start":
+            if len(entries) == 0:
+                print('ENTRY record not found. Create a new one.')
+                new_record(cookies, 'Start')
+            else:
+                print(f'There is already an ENTRY record: {entries}')
 
-    if ACTION == "start":
-        # CHECK IF START EXISTS
-        print('\nSearch for Start/Inicio')
-        entry_start_queries = ["//*[contains(@title, 'Inicio')]//ancestor::div[contains(@class, 'real-record')]", "//*[contains(@title, 'Start')]//ancestor::div[contains(@class, 'real-record')]"]
-        entry_start = find_element('XPATH', entry_start_queries)
-        if record_do_not_exist('start', entry_start):
-            validate('start')
-
-    elif ACTION == "exit":
-        # CHECK IF EXIT EXISTS
-        print('\nSearch for End/Fin')
-        entry_exit_queries = ["//*[contains(@title, 'Fin')]//ancestor::div[contains(@class, 'real-record')]", "//*[contains(@title, 'End')]//ancestor::div[contains(@class, 'real-record')]"]
-        entry_exit = find_element('XPATH', entry_exit_queries)
-        if record_do_not_exist('exit', entry_exit):
-            validate('exit')
-
-    driver.quit()
+        if ACTION == "exit":
+            if len(exits) == 0:
+                print('EXIT record not found. Create a new one.')
+                new_record(cookies, 'End')
+            else:
+                print(f'There is already an EXIT record: {exits}')

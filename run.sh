@@ -6,5 +6,5 @@ docker run \
     -e intemo_user=$intemo_user \
     -e intemo_pass=$intemo_pass \
     -e INTEMO_ACTION=$INTEMO_ACTION \
+    -e INTEMO_HOST=$INTEMO_HOST \
     intemo-logger
- 
