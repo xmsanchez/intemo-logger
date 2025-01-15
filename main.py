@@ -23,8 +23,6 @@ headers = {
     'referer': f'{INTEMO_HOST}'
 }
 
-start_url = f'{INTEMO_HOST}/Security/LogIn/LogIn'
-
 def check_response(response):
     response_code = response.status_code
     response_message = response.content
