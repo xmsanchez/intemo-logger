@@ -1,16 +1,16 @@
 # intemo auto-logger
 
-**DISCLAIMER: THIS PROJECT USES SELENIUM.** Therefore, any changes in their website could affect the functionality of this script.
-
-I wanted to make it work with direct javascript calls to their API but I **couldn't manage to make the authentication** to work properly. I'm open to feedback on that.
+**DISCLAIMER: THIS PROJECT USES SELENIUM.** For the most part the script uses direct API calls, but **I couldn't manage to make entry validation** to work properly so I'm using selenium for that last step. I'm open to feedback on that.
 
 ## Description
 
 This project allows you to automate logging in intemo hour control system.
 
+It will make sure if it is a **working day**, a **holiday** or **vacation** by checking the employee calendar. It is fetched from the "worktimetable" javascript variable located in the calendar page which contains "workTimetableColors" and "workTimetableDescriptions" fields.
+
 The deployment is done in **Google Cloud** and the execution leverages the **Google Cloud Run** service, which has a few triggers at the time where you need to run the script (morning and afternoon).
 
-It will make sure if it is a **working day**, a **holiday** or **vacation** by fetching the calendar. It is based on CSS colors.
+If you'd rather prefer it to run as a daemon and wish to support that feature, feel free to open a Pull Request :-)
 
 ## How it works
 
@@ -24,17 +24,6 @@ The script will accept three parameters as environment variables which will cont
 Based on the "INTEMO_ACTION" value, it will check if and enter or an exit register exists. If it exists, it will not try to do the action again (avoid duplicate entries if script runs multiple times).
 
 If the enter or exit entry is not present, then it will create the new registry in the platform.
-
-## Add a random for entry / exit
-
-You can search and uncomment these lines:
-
-```python
-# Wait for some seconds before starting (give it a random entry/exit time)
-wait_for_execution(300)
-```
-
-The function ``wait_for_execution(300)`` accepts and integer which will be used in the random function as ``time.sleep(int)``, so the script runs after the generated time runs out.
 
 ## Google Cloud Run setup
 
@@ -76,5 +65,3 @@ Add a new scheduled trigger. There are a few parameters to set:
 - - Exit: Run from monday to thursday at 16:30: ``30 16 * * 1-4``
 - - Exit: Run on fridays at 1pm: ``0 13 * * 5``
 - Time zone: Search for Spain and select Europe/Madrid.
-
-> NOTE: If you did set the ``wait_for_execution()`` function, remember to adapt your triggers.
