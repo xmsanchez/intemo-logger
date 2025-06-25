@@ -67,7 +67,7 @@ def is_working_day(tree):
         # Use regex to extract the keys and values for workTimetableColors and workTimetableDescriptions
         # Thanks for this, GPT ;-D
         colors_pattern = re.compile(r'workTimetableColors\["(\d+)"\]\s*=\s*"([^"]+)"')
-        descriptions_pattern = re.compile(r'workTimetableDescriptions\["(\d+)"\]\s*=\s*"([^"]+)"')
+        descriptions_pattern = re.compile(r'workTimetableDescriptions\["(\d+)"\]\s*=\s*"([^"]*)"')
 
         # work_timetable_colors is not really used but I'll leave it to switch to it just in
         # case intemo makes some changes to the descriptions that might affect this script
@@ -75,7 +75,10 @@ def is_working_day(tree):
         work_timetable_descriptions = {match[0]: match[1] for match in descriptions_pattern.findall(target_script)}
 
         for item in work_timetable_descriptions:
-            if "Horario SaaS" in work_timetable_descriptions[item] or 'Horario   viernes' in work_timetable_descriptions[item]:
+            # Below conditional is used if calendar is fetched from MyAttendance
+            # if "Horario SaaS" in work_timetable_descriptions[item] or 'Horario   viernes' in work_timetable_descriptions[item]:
+            # Below conditional is used if calendar is fetched from MyVacations
+            if work_timetable_descriptions[item] == "":
                 work_timetable_working_days.append(item)
             else:
                 work_timetable_not_working_days.append(item)
@@ -90,7 +93,8 @@ def is_working_day(tree):
         print('This IS a working day')
         return True
     elif today_date in work_timetable_not_working_days:
-        print('This is NOT a working day')
+        description = work_timetable_descriptions[today_date]
+        print(f'This is NOT a working day due to: "{description}"')
         return False
     else:
         raise Exception('Today date not found in calendar')
@@ -98,7 +102,7 @@ def is_working_day(tree):
 def get_employee_calendar(session, cookies):
     # Fetch the calendar to ensure today is a workday and not weekend or holiday
     print('\nGet calendar')
-    response = session.get(f'{INTEMO_HOST}/TimeAndAttendance/MyCalendar',
+    response = session.get(f'{INTEMO_HOST}/TimeAndAttendance/MyVacations',
                             allow_redirects=False,
                             headers=headers,
                             cookies=cookies)
